@@ -1,0 +1,92 @@
+
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>영상통화 + 채팅</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    body { font-family: sans-serif; text-align: center; padding: 10px; }
+    video { width: 45%; max-width: 300px; margin: 5px; background: black; }
+    #chat { max-height: 200px; overflow-y: scroll; border: 1px solid #ccc; margin: 10px auto; padding: 5px; width: 90%; max-width: 400px; text-align: left; }
+    input[type="text"] { width: 70%; padding: 8px; }
+    button { padding: 8px; }
+  </style>
+  <script src="https://cdn.socket.io/4.0.0/socket.io.min.js"></script>
+</head>
+<body>
+  <h2>영상통화 + 채팅</h2>
+  <video id="localVideo" autoplay muted playsinline></video>
+  <video id="remoteVideo" autoplay playsinline></video>
+
+  <div id="chat"></div>
+  <input id="chatInput" type="text" placeholder="메시지를 입력하세요" />
+  <button onclick="sendChat()">전송</button>
+
+  <script>
+    const socket = io();
+    const localVideo = document.getElementById("localVideo");
+    const remoteVideo = document.getElementById("remoteVideo");
+    const chatDiv = document.getElementById("chat");
+
+    const peer = new RTCPeerConnection();
+
+    if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+      navigator.mediaDevices.getUserMedia({ video: true, audio: true })
+        .then(stream => {
+          localVideo.srcObject = stream;
+          stream.getTracks().forEach(track => peer.addTrack(track, stream));
+          return peer.createOffer();
+        })
+        .then(offer => peer.setLocalDescription(offer).then(() => offer))
+        .then(offer => socket.emit('offer', offer))
+        .catch(err => {
+          alert("카메라 접근 실패: " + err.message);
+        });
+    } else {
+      alert("이 브라우저에서는 카메라를 사용할 수 없습니다.");
+    }
+
+    peer.onicecandidate = e => {
+      if (e.candidate) socket.emit('candidate', e.candidate);
+    };
+
+    peer.ontrack = e => {
+      remoteVideo.srcObject = e.streams[0];
+    };
+
+    socket.on('offer', offer => {
+      if (!peer.currentRemoteDescription) {
+        peer.setRemoteDescription(new RTCSessionDescription(offer))
+          .then(() => peer.createAnswer())
+          .then(answer => peer.setLocalDescription(answer).then(() => answer))
+          .then(answer => socket.emit('answer', answer));
+      }
+    });
+
+    socket.on('answer', answer => {
+      peer.setRemoteDescription(new RTCSessionDescription(answer));
+    });
+
+    socket.on('candidate', candidate => {
+      peer.addIceCandidate(new RTCIceCandidate(candidate));
+    });
+
+    function sendChat() {
+      const input = document.getElementById("chatInput");
+      const msg = input.value.trim();
+      if (msg) {
+        socket.emit('chat', msg);
+        input.value = '';
+      }
+    }
+
+    socket.on('chat', msg => {
+      const div = document.createElement("div");
+      div.textContent = msg;
+      chatDiv.appendChild(div);
+      chatDiv.scrollTop = chatDiv.scrollHeight;
+    });
+  </script>
+</body>
+</html>
